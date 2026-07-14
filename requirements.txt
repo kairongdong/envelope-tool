@@ -1,0 +1,16 @@
+numpy>=1.26
+scipy>=1.11
+scikit-image>=0.22
+trimesh>=4.0
+MDAnalysis>=2.7
+PyYAML>=6.0
+fastapi>=0.110
+uvicorn[standard]>=0.27
+python-multipart>=0.0.9
+
+# optional: enables mesh decimation (fewer triangles in the viewer mesh).
+# without it the tool still works, just skips the decimate_faces step.
+fast_simplification>=0.1.7
+
+# optional: only needed for `python envelope.py ... --preview` (static image export)
+matplotlib>=3.8

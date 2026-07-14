@@ -1,0 +1,35 @@
+global:
+  sigma: 3.5
+  smoothing_iterations: 10
+  decimate_faces: 3000
+  grid_spacing: 1.5
+  threshold: auto
+  basis: backbone
+
+domains:
+  # each domain lists all 12 chains; the tool automatically expands
+  # this into one separate, correctly-positioned envelope per chain
+  # (e.g. kinase_A ... kinase_L), both via the CLI and the web app.
+  kinase:
+    segid: [A, B, C, D, E, F, G, H, I, J, K, L]
+    resid: "7-274"
+    color: [0.502, 0.808, 0.839]    # #80ced6
+    transparency: 0
+
+  regseg:
+    segid: [A, B, C, D, E, F, G, H, I, J, K, L]
+    resid: "275-294"
+    color: [1.0, 0.937, 0.588]    # #ffef96
+    transparency: 0
+
+  cam-footprint:
+    segid: [A, B, C, D, E, F, G, H, I, J, K, L]
+    resid: "295-314"
+    color: [0.933, 0.635, 0.604]    # #eea29a
+    transparency: 0
+
+  hub:
+    segid: [A, B, C, D, E, F, G, H, I, J, K, L]
+    resid: "315-444"
+    color: [0.698, 0.698, 0.698]    # #b2b2b2
+    transparency: 0

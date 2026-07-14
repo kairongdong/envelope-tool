@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Envelope Tool</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/ngl@2.0.0-dev.39/dist/ngl.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <aside id="panel">
+    <div id="panel-scroll">
+      <h1>
+        <span class="brand-mark"></span>Envelope
+        <input type="color" id="theme-accent" class="theme-swatch" value="#ff2f92" title="Change theme color">
+      </h1>
+
+      <section class="block">
+        <h2>Session</h2>
+        <p class="hint">Save everything below (structure, domains, params, display) to one file, and load it later to pick up right where you left off.</p>
+        <div class="footer-row">
+          <button id="save-state-btn" class="secondary" type="button">Save state</button>
+          <button id="load-state-btn" class="secondary" type="button">Load state</button>
+        </div>
+        <input type="file" id="state-input" accept=".json" hidden>
+        <div id="state-status" class="info-line"></div>
+      </section>
+
+      <section class="block">
+        <h2>Structure</h2>
+        <div id="dropzone" class="dropzone">
+          <span id="dropzone-label">Drop a PDB file here or click to choose</span>
+          <input type="file" id="pdb-input" accept=".pdb,.ent" hidden>
+        </div>
+        <div id="structure-info" class="info-line"></div>
+      </section>
+
+      <section class="block">
+        <h2>Domains</h2>
+        <div id="domains"></div>
+        <button id="add-domain" class="secondary" type="button" disabled>+ Add domain</button>
+        <button id="load-yaml-btn" class="secondary" type="button" disabled>Load domains.yaml</button>
+        <input type="file" id="yaml-input" accept=".yaml,.yml" hidden>
+        <div id="envelope-count" class="info-line"></div>
+        <div id="yaml-status" class="info-line"></div>
+      </section>
+
+      <section class="block" id="downloads-block" hidden>
+        <details id="downloads-fold">
+          <summary><h2 class="inline-h2">Downloads</h2></summary>
+          <ul id="downloads"></ul>
+          <details id="log-block">
+            <summary>Run log</summary>
+            <pre id="log"></pre>
+          </details>
+        </details>
+      </section>
+    </div>
+
+    <div id="panel-footer">
+      <div class="footer-row">
+        <label class="footer-field">background
+          <select id="v-background">
+            <option value="dark" selected>dark</option>
+            <option value="white">white</option>
+            <option value="transparent">transparent</option>
+          </select>
+        </label>
+        <label class="footer-check">
+          <input type="checkbox" id="v-show-structure" checked>
+          show structure
+        </label>
+      </div>
+
+      <div class="footer-row">
+        <label class="footer-field">surface
+          <select id="v-surface-style">
+            <option value="plastic" selected>plastic</option>
+            <option value="matte">matte</option>
+            <option value="glossy">glossy</option>
+            <option value="metallic">metallic</option>
+            <option value="faceted">faceted</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="footer-row">
+        <button id="reset-view-btn" type="button" class="secondary">Reset view (orient/zoom)</button>
+      </div>
+      <div class="footer-row turn-row">
+        <span class="turn-label">X</span>
+        <input type="number" id="turn-x-deg" value="90" step="1" title="degrees">
+        <button id="turn-x-btn" type="button" class="secondary">Turn</button>
+      </div>
+      <div class="footer-row turn-row">
+        <span class="turn-label">Y</span>
+        <input type="number" id="turn-y-deg" value="90" step="1" title="degrees">
+        <button id="turn-y-btn" type="button" class="secondary">Turn</button>
+      </div>
+      <div class="footer-row turn-row">
+        <span class="turn-label">Z</span>
+        <input type="number" id="turn-z-deg" value="90" step="1" title="degrees">
+        <button id="turn-z-btn" type="button" class="secondary">Turn</button>
+      </div>
+
+      <div class="footer-row snapshot-row">
+        <select id="v-snapshot-resolution" title="Resolution">
+          <option value="1">1x</option>
+          <option value="2" selected>2x</option>
+          <option value="4">4x</option>
+          <option value="6">6x (print)</option>
+        </select>
+        <select id="v-snapshot-format" title="Format">
+          <option value="png" selected>PNG</option>
+          <option value="jpeg">JPEG</option>
+        </select>
+        <button id="save-snapshot" type="button" class="snapshot-btn" title="Save current view as an image">Save image</button>
+      </div>
+
+      <details class="render-params" open>
+        <summary>Render parameters</summary>
+        <div class="grid2">
+          <label>sigma (Å)
+            <input type="number" id="g-sigma" step="0.1" value="3.5">
+          </label>
+          <label>smoothing
+            <input type="number" id="g-smoothing" step="1" value="10">
+          </label>
+          <label>decimate faces
+            <input type="number" id="g-decimate" step="100" value="3000">
+          </label>
+          <label>grid spacing (Å)
+            <input type="number" id="g-spacing" step="0.1" value="1.5">
+          </label>
+        </div>
+        <div class="grid2">
+          <label>threshold
+            <select id="g-threshold-mode">
+              <option value="auto" selected>auto</option>
+              <option value="manual">manual</option>
+            </select>
+          </label>
+          <label>level
+            <input type="number" id="g-threshold-value" step="0.01" placeholder="auto" disabled>
+          </label>
+        </div>
+        <label>envelope based on
+          <select id="g-basis">
+            <option value="backbone" selected>backbone (cartoon-like)</option>
+            <option value="ca">CA trace only</option>
+            <option value="all_atom">all atom</option>
+          </select>
+        </label>
+      </details>
+
+      <button id="generate" class="primary" type="button" disabled>Generate envelopes</button>
+
+      <div id="progress-wrap" hidden>
+        <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
+        <div id="progress-label"></div>
+      </div>
+
+      <div id="generate-status" class="info-line"></div>
+    </div>
+  </aside>
+
+  <main id="viewer-wrap">
+    <div id="viewer"></div>
+  </main>
+
+</div>
+
+<template id="domain-row-template">
+  <div class="domain-row">
+    <div class="domain-row-header">
+      <input type="text" class="d-name" placeholder="domain name (e.g. kinase_domain)">
+      <input type="color" class="d-color" value="#ff2f92">
+      <button type="button" class="remove-domain" title="Remove domain">✕</button>
+    </div>
+
+    <div class="d-field">
+      <span class="field-label">chains</span>
+      <div class="chain-chips"></div>
+    </div>
+
+    <label class="d-field">resid ranges
+      <input type="text" class="d-resid" placeholder="e.g. 7-274,300-310">
+    </label>
+    <div class="range-chips"></div>
+
+    <label class="d-field slider-field">transparency
+      <input type="range" class="d-transparency" min="0" max="1" step="0.05" value="0.35">
+      <span class="d-transparency-val">0.35</span>
+    </label>
+
+    <details class="overrides">
+      <summary>Render parameters for this domain<span class="override-badge"></span></summary>
+      <div class="grid2">
+        <label>sigma
+          <input type="number" class="d-sigma" step="0.1">
+        </label>
+        <label>smoothing iterations
+          <input type="number" class="d-smoothing" step="1">
+        </label>
+        <label>decimate faces
+          <input type="number" class="d-decimate" step="100">
+        </label>
+        <label>grid spacing (Å)
+          <input type="number" class="d-spacing" step="0.1">
+        </label>
+      </div>
+      <div class="grid2">
+        <label>threshold
+          <select class="d-threshold-mode">
+            <option value="auto">auto</option>
+            <option value="manual">manual</option>
+          </select>
+        </label>
+        <label>level
+          <input type="number" class="d-threshold-value" step="0.01" placeholder="auto" disabled>
+        </label>
+      </div>
+      <label>envelope based on
+        <select class="d-basis">
+          <option value="backbone">backbone (cartoon-like)</option>
+          <option value="ca">CA trace only</option>
+          <option value="all_atom">all atom</option>
+        </select>
+      </label>
+    </details>
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>
