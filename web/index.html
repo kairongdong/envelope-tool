@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Envelope Tool</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='11' fill='%23ff2f92'/></svg>">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/ngl@2.0.0-dev.39/dist/ngl.js"></script>
 </head>
@@ -18,6 +19,7 @@
 
       <section class="block">
         <h2>Session</h2>
+        <button id="restart-btn" class="secondary restart-btn" type="button" title="Clear everything and start a new session">↺ Restart</button>
         <p class="hint">Save everything below (structure, domains, params, display) to one file, and load it later to pick up right where you left off.</p>
         <div class="footer-row">
           <button id="save-state-btn" class="secondary" type="button">Save state</button>
@@ -62,9 +64,9 @@
       <div class="footer-row">
         <label class="footer-field">background
           <select id="v-background">
-            <option value="dark" selected>dark</option>
+            <option value="dark">dark</option>
             <option value="white">white</option>
-            <option value="transparent">transparent</option>
+            <option value="transparent" selected>transparent</option>
           </select>
         </label>
         <label class="footer-check">
@@ -73,38 +75,41 @@
         </label>
       </div>
 
-      <div class="footer-row">
-        <label class="footer-field">surface
-          <select id="v-surface-style">
-            <option value="plastic" selected>plastic</option>
-            <option value="matte">matte</option>
-            <option value="glossy">glossy</option>
-            <option value="metallic">metallic</option>
-            <option value="faceted">faceted</option>
-          </select>
-        </label>
+      <div class="footer-row view-row">
+        <button id="reset-view-btn" type="button" class="secondary" title="Reset view (orient/zoom)">Reset view</button>
+        <select id="v-surface-style" title="Surface style">
+          <option value="plastic" selected>plastic</option>
+          <option value="matte">matte</option>
+          <option value="glossy">glossy</option>
+          <option value="metallic">metallic</option>
+          <option value="faceted">faceted</option>
+        </select>
       </div>
 
-      <div class="footer-row">
-        <button id="reset-view-btn" type="button" class="secondary">Reset view (orient/zoom)</button>
-      </div>
-      <div class="footer-row turn-row">
-        <span class="turn-label">X</span>
-        <input type="number" id="turn-x-deg" value="90" step="1" title="degrees">
-        <button id="turn-x-btn" type="button" class="secondary">Turn</button>
-      </div>
-      <div class="footer-row turn-row">
-        <span class="turn-label">Y</span>
-        <input type="number" id="turn-y-deg" value="90" step="1" title="degrees">
-        <button id="turn-y-btn" type="button" class="secondary">Turn</button>
-      </div>
-      <div class="footer-row turn-row">
-        <span class="turn-label">Z</span>
-        <input type="number" id="turn-z-deg" value="90" step="1" title="degrees">
-        <button id="turn-z-btn" type="button" class="secondary">Turn</button>
+      <div class="footer-row turn-row-compact">
+        <div class="turn-group">
+          <span class="turn-label">X</span>
+          <input type="number" id="turn-x-deg" value="90" step="1" title="degrees">
+          <button id="turn-x-btn" type="button" class="turn-go-btn" title="Turn around X">↻</button>
+        </div>
+        <div class="turn-group">
+          <span class="turn-label">Y</span>
+          <input type="number" id="turn-y-deg" value="90" step="1" title="degrees">
+          <button id="turn-y-btn" type="button" class="turn-go-btn" title="Turn around Y">↻</button>
+        </div>
+        <div class="turn-group">
+          <span class="turn-label">Z</span>
+          <input type="number" id="turn-z-deg" value="90" step="1" title="degrees">
+          <button id="turn-z-btn" type="button" class="turn-go-btn" title="Turn around Z">↻</button>
+        </div>
       </div>
 
       <div class="footer-row snapshot-row">
+        <select id="v-snapshot-background" title="Figure background">
+          <option value="current" selected>current bg</option>
+          <option value="white">white bg</option>
+          <option value="transparent">transparent bg</option>
+        </select>
         <select id="v-snapshot-resolution" title="Resolution">
           <option value="1">1x</option>
           <option value="2" selected>2x</option>
@@ -115,12 +120,14 @@
           <option value="png" selected>PNG</option>
           <option value="jpeg">JPEG</option>
         </select>
+      </div>
+      <div class="footer-row">
         <button id="save-snapshot" type="button" class="snapshot-btn" title="Save current view as an image">Save image</button>
       </div>
 
       <details class="render-params" open>
         <summary>Render parameters</summary>
-        <div class="grid2">
+        <div class="grid3">
           <label>sigma (Å)
             <input type="number" id="g-sigma" step="0.1" value="3.5">
           </label>
@@ -133,8 +140,6 @@
           <label>grid spacing (Å)
             <input type="number" id="g-spacing" step="0.1" value="1.5">
           </label>
-        </div>
-        <div class="grid2">
           <label>threshold
             <select id="g-threshold-mode">
               <option value="auto" selected>auto</option>
@@ -144,14 +149,14 @@
           <label>level
             <input type="number" id="g-threshold-value" step="0.01" placeholder="auto" disabled>
           </label>
+          <label class="grid3-span2">envelope based on
+            <select id="g-basis">
+              <option value="backbone" selected>backbone (cartoon-like)</option>
+              <option value="ca">CA trace only</option>
+              <option value="all_atom">all atom</option>
+            </select>
+          </label>
         </div>
-        <label>envelope based on
-          <select id="g-basis">
-            <option value="backbone" selected>backbone (cartoon-like)</option>
-            <option value="ca">CA trace only</option>
-            <option value="all_atom">all atom</option>
-          </select>
-        </label>
       </details>
 
       <button id="generate" class="primary" type="button" disabled>Generate envelopes</button>
@@ -176,11 +181,17 @@
     <div class="domain-row-header">
       <input type="text" class="d-name" placeholder="domain name (e.g. kinase_domain)">
       <input type="color" class="d-color" value="#ff2f92">
+      <label class="d-show-toggle" title="Show/hide this domain's segment on the structure">
+        <input type="checkbox" class="d-show-structure" checked>
+      </label>
       <button type="button" class="remove-domain" title="Remove domain">✕</button>
     </div>
 
     <div class="d-field">
-      <span class="field-label">chains</span>
+      <span class="field-label">
+        chains
+        <button type="button" class="chain-toggle-all" title="Select/deselect all chains"></button>
+      </span>
       <div class="chain-chips"></div>
     </div>
 
@@ -196,7 +207,7 @@
 
     <details class="overrides">
       <summary>Render parameters for this domain<span class="override-badge"></span></summary>
-      <div class="grid2">
+      <div class="grid3">
         <label>sigma
           <input type="number" class="d-sigma" step="0.1">
         </label>
@@ -209,8 +220,6 @@
         <label>grid spacing (Å)
           <input type="number" class="d-spacing" step="0.1">
         </label>
-      </div>
-      <div class="grid2">
         <label>threshold
           <select class="d-threshold-mode">
             <option value="auto">auto</option>
@@ -220,14 +229,14 @@
         <label>level
           <input type="number" class="d-threshold-value" step="0.01" placeholder="auto" disabled>
         </label>
+        <label class="grid3-span2">envelope based on
+          <select class="d-basis">
+            <option value="backbone">backbone (cartoon-like)</option>
+            <option value="ca">CA trace only</option>
+            <option value="all_atom">all atom</option>
+          </select>
+        </label>
       </div>
-      <label>envelope based on
-        <select class="d-basis">
-          <option value="backbone">backbone (cartoon-like)</option>
-          <option value="ca">CA trace only</option>
-          <option value="all_atom">all atom</option>
-        </select>
-      </label>
     </details>
   </div>
 </template>

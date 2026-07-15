@@ -38,12 +38,24 @@ if (savedAccent) {
   applyThemeColor(savedAccent, { persist: false });
 }
 
+// A full reload is the simplest reliable way to guarantee a truly clean
+// slate (structure, domains, generated envelopes, log, all in-memory state)
+// without having to enumerate and reset every piece of UI by hand. The
+// theme color is the only thing that persists (via localStorage), which
+// matches it being a display preference rather than session data.
+document.getElementById("restart-btn").addEventListener("click", () => {
+  if (confirm("Start a new session? This clears the current structure and all domains. Unsaved changes will be lost -- use Save state first if you want to keep them.")) {
+    location.reload();
+  }
+});
+
 const state = {
   sessionId: null,
   file: null,
   segInfo: {},        // segid -> { n_atoms, ranges, resnames }
   structureComp: null,
   shapeComps: [],
+  domainColorReprs: [],  // cartoon representations used for the live per-domain color preview
   initialOrientation: null,
 };
 
@@ -61,6 +73,7 @@ function initViewer() {
     ambientIntensity: 0.75,
     lightIntensity: 0.55,
   });
+  applyBackground(backgroundSelect.value);
   window.addEventListener("resize", () => stage.handleResize());
   // NGL's own render loop only redraws on interaction/parameter changes; on
   // some browsers that leaves a stale frame (e.g. background color changes
@@ -142,14 +155,25 @@ surfaceStyleSelect.addEventListener("change", () => applySurfaceStyle(surfaceSty
 // ---------- Save snapshot ----------
 
 const saveSnapshotBtn = document.getElementById("save-snapshot");
+const snapshotBackgroundSelect = document.getElementById("v-snapshot-background");
 const snapshotResolutionSelect = document.getElementById("v-snapshot-resolution");
 const snapshotFormatSelect = document.getElementById("v-snapshot-format");
 
 // NGL's makeImage() only ever produces PNG (it calls canvas.toBlob with no
 // mime type), so JPEG is re-encoded client-side via an offscreen canvas.
-async function exportViewerImage(factor, format) {
-  const transparent = backgroundSelect.value === "transparent" && format === "png";
-  const pngBlob = await stage.makeImage({ factor, antialias: true, trim: false, transparent });
+async function exportViewerImage(factor, format, bgChoice) {
+  const originalBg = backgroundSelect.value;
+  const targetBg = bgChoice === "current" ? originalBg : bgChoice;
+  if (targetBg !== originalBg) applyBackground(targetBg);
+
+  const transparent = targetBg === "transparent" && format === "png";
+  let pngBlob;
+  try {
+    pngBlob = await stage.makeImage({ factor, antialias: true, trim: false, transparent });
+  } finally {
+    if (targetBg !== originalBg) applyBackground(originalBg);
+  }
+
   if (format === "png") return pngBlob;
 
   const bitmap = await createImageBitmap(pngBlob);
@@ -169,7 +193,8 @@ saveSnapshotBtn.addEventListener("click", async () => {
   try {
     const factor = parseInt(snapshotResolutionSelect.value, 10);
     const format = snapshotFormatSelect.value;
-    const blob = await exportViewerImage(factor, format);
+    const bgChoice = snapshotBackgroundSelect.value;
+    const blob = await exportViewerImage(factor, format, bgChoice);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -227,7 +252,25 @@ async function handleFile(file) {
       .join("\n");
     structureInfo.textContent = `${data.n_atoms} atoms total\n${segSummary}`;
 
+    // Loading a new structure keeps existing domain rows as-is (this is a
+    // reload/update, not a reset) and just refreshes which chains they can
+    // select from. If a domain's previously-selected chains don't exist in
+    // the new structure, its chip selection quietly ends up empty (fine --
+    // it'll just be skipped when generating); we only add a small note so
+    // the user knows to double check it, without blocking anything.
+    const existingRows = Array.from(document.querySelectorAll(".domain-row"));
+    const hadChainsBefore = existingRows.map((row) => selectedChains(row).length > 0);
+
     document.querySelectorAll(".chain-chips").forEach(fillChainChips);
+
+    const nowEmpty = existingRows.filter((row, i) => hadChainsBefore[i] && selectedChains(row).length === 0);
+    if (nowEmpty.length > 0) {
+      const names = nowEmpty.map((row) => row.querySelector(".d-name").value || "unnamed").join(", ");
+      structureInfo.textContent += `\n\nNote: ${nowEmpty.length} domain(s) (${names}) had chain selections `
+        + `that don't exist in this structure. They're left as-is (no chains selected, so they'll be `
+        + `skipped when generating) -- update or remove them if needed.`;
+    }
+
     addDomainBtn.disabled = false;
     loadYamlBtn.disabled = false;
     generateBtn.disabled = document.querySelectorAll(".domain-row").length === 0;
@@ -247,13 +290,80 @@ async function loadStructureIntoViewer(file) {
   }
   const ext = file.name.toLowerCase().endsWith(".ent") ? "pdb" : file.name.split(".").pop();
   const comp = await stage.loadFile(file, { ext: ext === "ent" ? "pdb" : ext });
-  comp.addRepresentation("cartoon", { color: "#8a8a92", opacity: 1.0 });
   comp.addRepresentation("licorice", { sele: "hetero and not water", color: "element" });
   comp.autoView();
   state.structureComp = comp;
+  state.domainColorReprs = [];
   state.initialOrientation = stage.viewerControls.getOrientation();
   applyStructureVisibility(showStructureCheckbox.checked);
   applyBackground(backgroundSelect.value);
+  updateDomainColoring();
+}
+
+// ---------- Live per-domain cartoon coloring (no generate needed) ----------
+//
+// The structure's cartoon is colored to match each domain's chosen color
+// over its selected chain(s) + residue range, updating immediately as
+// chains/resid/color change -- independent of the (slower) actual envelope
+// generation. Regions not covered by any domain stay neutral grey.
+
+// NGL selection language: chain must be selected via ":<chain>" (the
+// "segid <x>" keyword does not compose correctly with a following
+// "and (<resid-range>)" clause -- verified empirically).
+function buildNglSelection(chains, residStr) {
+  if (!chains || chains.length === 0) return null;
+  const chainPart = chains.length > 1
+    ? `(${chains.map((c) => `:${c}`).join(" or ")})`
+    : `:${chains[0]}`;
+  const ranges = (residStr || "").split(",").map((r) => r.trim()).filter(Boolean);
+  if (ranges.length === 0) return chainPart;
+  const residPart = ranges.length > 1 ? `(${ranges.join(" or ")})` : ranges[0];
+  return `${chainPart} and (${residPart})`;
+}
+
+// Each domain can be individually shown or hidden on the structure (the
+// "eye" checkbox in its header), independent of the master "show structure"
+// checkbox and of every other domain. A hidden domain's segment is left
+// out of its own colored representation entirely (not just recolored grey)
+// -- but its selection still counts toward carving out the neutral "rest of
+// the structure" region, so hiding a domain doesn't make the base cartoon
+// reclaim that area.
+function updateDomainColoring() {
+  if (!state.structureComp) return;
+
+  try {
+    state.domainColorReprs.forEach((repComp) => state.structureComp.removeRepresentation(repComp));
+    state.domainColorReprs = [];
+
+    const domainSelections = [];
+    document.querySelectorAll(".domain-row").forEach((row) => {
+      const chains = selectedChains(row);
+      const resid = row.querySelector(".d-resid").value.trim();
+      const sel = buildNglSelection(chains, resid);
+      if (!sel) return;
+      // Each selection needs its own parens before being OR'd together --
+      // `not (A or B)` silently fails to negate correctly in NGL's selection
+      // grammar (matches everything instead of excluding A and B), whereas
+      // `not ((A) or (B))` works correctly. Verified empirically.
+      domainSelections.push(`(${sel})`);
+
+      if (!row.querySelector(".d-show-structure").checked) return;
+      const color = row.querySelector(".d-color").value;
+      const repComp = state.structureComp.addRepresentation("cartoon", { sele: sel, color });
+      state.domainColorReprs.push(repComp);
+    });
+
+    const baseSele = domainSelections.length > 0 ? `not (${domainSelections.join(" or ")})` : "*";
+    const baseRep = state.structureComp.addRepresentation("cartoon", { sele: baseSele, color: "#8a8a92" });
+    state.domainColorReprs.push(baseRep);
+
+    stage.viewer.requestRender();
+  } catch (err) {
+    // Surface failures visibly (not just in devtools) so this is diagnosable
+    // without needing to know how to open the browser console.
+    console.error("updateDomainColoring failed:", err);
+    structureInfo.textContent += `\n\n[domain coloring error] ${err.message}`;
+  }
 }
 
 // ---------- Domain rows ----------
@@ -266,6 +376,7 @@ function fillChainChips(container) {
     Array.from(container.querySelectorAll(".chain-chip.selected")).map((c) => c.dataset.segid)
   );
   const isFirstFill = container.children.length === 0;
+  const row = container.closest(".domain-row");
   container.innerHTML = "";
   Object.keys(state.segInfo).forEach((seg) => {
     const chip = document.createElement("span");
@@ -276,16 +387,25 @@ function fillChainChips(container) {
     if (shouldSelect) chip.classList.add("selected");
     chip.addEventListener("click", () => {
       chip.classList.toggle("selected");
-      const row = container.closest(".domain-row");
       renderRangeChipsForRow(row);
+      updateChainToggleAllState(row);
       updateEnvelopeCount();
+      updateDomainColoring();
     });
     container.appendChild(chip);
   });
+  updateChainToggleAllState(row);
 }
 
 function selectedChains(row) {
   return Array.from(row.querySelectorAll(".chain-chip.selected")).map((c) => c.dataset.segid);
+}
+
+function updateChainToggleAllState(row) {
+  const toggle = row.querySelector(".chain-toggle-all");
+  const chips = row.querySelectorAll(".chain-chip");
+  const allSelected = chips.length > 0 && Array.from(chips).every((c) => c.classList.contains("selected"));
+  toggle.classList.toggle("all-selected", allSelected);
 }
 
 function renderRangeChipsForRow(row) {
@@ -382,6 +502,20 @@ function addDomainRow(defaults = {}) {
   fillChainChips(row.querySelector(".chain-chips"));
   renderRangeChipsForRow(row);
 
+  row.querySelector(".chain-toggle-all").addEventListener("click", () => {
+    const chips = row.querySelectorAll(".chain-chip");
+    const allSelected = Array.from(chips).every((c) => c.classList.contains("selected"));
+    chips.forEach((c) => c.classList.toggle("selected", !allSelected));
+    updateChainToggleAllState(row);
+    renderRangeChipsForRow(row);
+    updateEnvelopeCount();
+    updateDomainColoring();
+  });
+
+  row.querySelector(".d-resid").addEventListener("input", updateDomainColoring);
+  row.querySelector(".d-color").addEventListener("input", updateDomainColoring);
+  row.querySelector(".d-show-structure").addEventListener("change", updateDomainColoring);
+
   const transRange = row.querySelector(".d-transparency");
   const transVal = row.querySelector(".d-transparency-val");
   transRange.addEventListener("input", () => { transVal.textContent = transRange.value; });
@@ -418,11 +552,13 @@ function addDomainRow(defaults = {}) {
     row.remove();
     generateBtn.disabled = document.querySelectorAll(".domain-row").length === 0;
     updateEnvelopeCount();
+    updateDomainColoring();
   });
 
   domainsContainer.appendChild(row);
   generateBtn.disabled = false;
   updateEnvelopeCount();
+  updateDomainColoring();
 }
 
 addDomainBtn.addEventListener("click", () => addDomainRow());
@@ -435,9 +571,14 @@ function updateEnvelopeCount() {
     envelopeCountEl.textContent = "";
     return;
   }
-  const total = rows.reduce((sum, row) => sum + Math.max(1, selectedChains(row).length), 0);
-  const chainNote = rows.some((row) => selectedChains(row).length > 1)
-    ? ` (${rows.length} domain(s) across selected chains)`
+  const active = rows.filter((row) => selectedChains(row).length > 0);
+  const total = active.reduce((sum, row) => sum + selectedChains(row).length, 0);
+  if (total === 0) {
+    envelopeCountEl.textContent = "0 envelope(s) total (no domain has a chain selected)";
+    return;
+  }
+  const chainNote = active.some((row) => selectedChains(row).length > 1)
+    ? ` (${active.length} domain(s) across selected chains)`
     : "";
   envelopeCountEl.textContent = `${total} envelope(s) total${chainNote}`;
 }
@@ -504,6 +645,7 @@ function collectDisplayState() {
     background: backgroundSelect.value,
     showStructure: showStructureCheckbox.checked,
     surfaceStyle: surfaceStyleSelect.value,
+    snapshotBackground: snapshotBackgroundSelect.value,
     snapshotResolution: snapshotResolutionSelect.value,
     snapshotFormat: snapshotFormatSelect.value,
     themeAccent: themeSwatch.value,
@@ -524,6 +666,7 @@ function applyDisplayState(display) {
     surfaceStyleSelect.value = display.surfaceStyle;
     applySurfaceStyle(display.surfaceStyle);
   }
+  if (display.snapshotBackground) snapshotBackgroundSelect.value = display.snapshotBackground;
   if (display.snapshotResolution) snapshotResolutionSelect.value = display.snapshotResolution;
   if (display.snapshotFormat) snapshotFormatSelect.value = display.snapshotFormat;
   if (display.themeAccent) {
@@ -624,6 +767,7 @@ function applyDomainSpecToRow(row, spec) {
   row.querySelector(".d-transparency").value = spec.transparency;
   row.querySelector(".d-transparency-val").textContent = spec.transparency;
   row.querySelector(".d-resid").value = Array.isArray(spec.resid) ? spec.resid.join(",") : (spec.resid || "");
+  row.querySelector(".d-show-structure").checked = spec.showStructure !== false;
 
   const wantedSegids = new Set(
     spec.segid ? (Array.isArray(spec.segid) ? spec.segid : [spec.segid]) : Object.keys(state.segInfo)
@@ -668,6 +812,8 @@ function applyDomainSpecToRow(row, spec) {
   if (specThresholdStr !== globalThresholdStr) markOverridden(thresholdMode);
 
   updateOverrideBadge(row);
+  updateChainToggleAllState(row);
+  updateDomainColoring();
 }
 
 // ---------- Collect form -> request payload ----------
@@ -698,12 +844,16 @@ function collectGlobal() {
 
 // Reads all domain rows and expands each into one entry per selected chain
 // (plain name if only one chain is selected; chain-suffixed name otherwise).
+// Rows with zero chains selected are silently skipped -- not an error, just
+// nothing to generate for that domain.
 function collectDomains() {
   const rows = Array.from(document.querySelectorAll(".domain-row"));
   const domains = [];
   rows.forEach((row) => {
-    const name = row.querySelector(".d-name").value.trim();
     const chains = selectedChains(row);
+    if (chains.length === 0) return;
+
+    const name = row.querySelector(".d-name").value.trim();
     const resid = row.querySelector(".d-resid").value.trim();
     const color = hexToRgb01(row.querySelector(".d-color").value);
     const transparency = parseFloat(row.querySelector(".d-transparency").value);
@@ -720,11 +870,11 @@ function collectDomains() {
       ? parseFloat(row.querySelector(".d-threshold-value").value)
       : "auto";
 
-    const targetChains = chains.length ? chains : [null];
-    targetChains.forEach((seg) => {
+    chains.forEach((seg) => {
+      const resultName = chains.length > 1 ? `${name}_${seg}` : name;
       domains.push({
-        name: targetChains.length > 1 ? `${name}_${seg}` : name,
-        segid: seg ? [seg] : null,
+        name: resultName,
+        segid: [seg],
         resid: resid || null,
         color,
         transparency,
@@ -745,6 +895,7 @@ function collectDomainsRaw() {
     resid: row.querySelector(".d-resid").value.trim() || null,
     color: hexToRgb01(row.querySelector(".d-color").value),
     transparency: parseFloat(row.querySelector(".d-transparency").value),
+    showStructure: row.querySelector(".d-show-structure").checked,
     sigma: parseFloat(row.querySelector(".d-sigma").value),
     smoothing_iterations: parseInt(row.querySelector(".d-smoothing").value, 10),
     decimate_faces: parseInt(row.querySelector(".d-decimate").value, 10),
@@ -798,13 +949,14 @@ generateBtn.addEventListener("click", async () => {
     generateStatus.classList.add("error");
     return;
   }
-  const rows = Array.from(document.querySelectorAll(".domain-row"));
-  if (rows.some((row) => selectedChains(row).length === 0)) {
-    generateStatus.textContent = "Every domain needs at least one chain selected.";
+  // Domains with no chain selected are silently skipped, not an error --
+  // only complain if that leaves nothing at all to generate.
+  const domains = collectDomains();
+  if (domains.length === 0) {
+    generateStatus.textContent = "No domain has a chain selected -- nothing to generate.";
     generateStatus.classList.add("error");
     return;
   }
-  const domains = collectDomains();
   if (domains.some((d) => !d.name)) {
     generateStatus.textContent = "Every domain needs a name.";
     generateStatus.classList.add("error");
