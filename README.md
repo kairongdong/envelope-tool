@@ -101,7 +101,7 @@ differences are how you install Python and open a terminal.
 
 3. **Clone the repo:**
    ```bash
-   git clone https://github.com/<your-username>/envelope-tool.git
+   git clone https://github.com/kairongdong/envelope-tool.git
    cd envelope-tool
    ```
 
